@@ -21,6 +21,13 @@ final class NetworkServer {
     func start(port: UInt16 = NetworkConstants.defaultPort) throws {
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
+        // Reap half-open connections (e.g. an app killed or reinstalled without a FIN) within ~25s.
+        if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+            tcp.enableKeepalive = true
+            tcp.keepaliveIdle = 10
+            tcp.keepaliveInterval = 5
+            tcp.keepaliveCount = 3
+        }
 
         let nwPort = NWEndpoint.Port(rawValue: port) ?? .any
         listener = try NWListener(using: parameters, on: nwPort)
@@ -181,6 +188,6 @@ final class NetworkServer {
     }
 
     var connectedClientsCount: Int {
-        connections.count
+        connections.filter { $0.state == .ready }.count
     }
 }
