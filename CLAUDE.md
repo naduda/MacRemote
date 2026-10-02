@@ -18,7 +18,7 @@ xcodebuild -workspace MacRemote.xcworkspace -scheme MacRemoteClient -configurati
 
 ## Architecture
 
-MacRemote is a remote control app: **iOS Client** controls **macOS Server** over local network.
+MacRemote is an unlock-only app: **iOS Client** unlocks the **macOS Server** Mac (Face ID + Action Button) over local network.
 
 ```
 iOS Client ←→ TCP (JSON + 4-byte length prefix) ←→ macOS Server
@@ -27,21 +27,22 @@ iOS Client ←→ TCP (JSON + 4-byte length prefix) ←→ macOS Server
 
 ### Key Components
 
-**Shared/** - Protocol definitions shared between client and server
-- `RemoteMessage.swift` - Client→Server messages (move, click, scroll, key, media)
+**Shared/** - Protocol shared between client and server
+- `RemoteMessage.swift` - `RemoteMessage` (ping, unlock) and `ServerMessage`
+- `UnlockProtocol.swift` - challenge/HMAC signature and result codes
 - `NetworkConstants.swift` - Service type `_macremote._tcp`, port 5150
 
 **MacRemoteServer/** - macOS menubar app (LSUIElement=true, no sandbox)
-- `ServerManager.swift` - Orchestrates server, Bonjour, input; checks accessibility permission
+- `ServerManager.swift` - Orchestrates server, Bonjour, unlock; checks accessibility permission
 - `NetworkServer.swift` - TCP server using `NWListener`
-- `InputController.swift` - Mouse/keyboard injection via `CGEvent` API
+- `UnlockVerifier.swift` / `RemoteUnlockStore.swift` - challenge verification, Keychain secrets
+- `InputController.swift` - Lock-screen password typing via `CGEvent`
 - `BonjourAdvertiser.swift` - Service publication via `NetService`
 
 **MacRemoteClient/** - iOS app
-- `NetworkClient.swift` - TCP client using `NWConnection`
-- `BonjourBrowser.swift` - Service discovery using `NWBrowser`
-- `TrackpadView.swift` - Gesture handling for mouse control
-- `RemoteControlView.swift` - Tab container with embedded keyboard input
+- `NetworkClient.swift` / `BonjourBrowser.swift` / `ConnectionView.swift` - connect to a Mac and pair
+- `UnlockView.swift` - pairing key entry and Unlock button
+- `RemoteUnlockService.swift`, `UnlockMacIntent.swift` - Face ID gated unlock, Action Button intent
 
 ### Message Framing
 
@@ -80,12 +81,3 @@ open /Applications/MacRemoteServer.app
 ```
 
 This ensures you test with the latest version running from Applications.
-
-## Adding New Features
-
-When adding new remote control actions:
-1. Add case to `RemoteMessage` enum in `Shared/RemoteMessage.swift`
-2. Handle the message in `ServerManager.handleMessage()`
-3. Implement the action in `InputController.swift`
-4. Add UI in the appropriate iOS view
-5. Add localized strings for any user-facing text

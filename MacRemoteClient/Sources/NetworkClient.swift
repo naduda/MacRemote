@@ -5,19 +5,12 @@ import Network
 final class NetworkClient: ObservableObject {
 
     @Published var isConnected = false
-    @Published var screenSize: CGSize = .zero
     @Published var connectionError: String?
-    @Published var apps: [AppInfo] = []
-    @Published var isLoadingApps = false
-    @Published var isScreenStreaming = false
     @Published private(set) var isUnlockAvailable = false
     @Published private(set) var pairingState: PairingState = .unpaired
     var hasUnlockPairingKey: Bool { pairingState != .unpaired }
     @Published var unlockStatus: String?
     @Published var isAuthenticatingForUnlock = false
-
-    // Callback for received screen frames
-    var onScreenFrameReceived: ((ScreenFrame) -> Void)?
 
     private var connection: NWConnection?
     private let queue = DispatchQueue(label: "com.macremote.client", qos: .userInteractive)
@@ -99,69 +92,6 @@ final class NetworkClient: ObservableObject {
         }
     }
 
-    func move(dx: Double, dy: Double) {
-        send(.move(dx: dx, dy: dy))
-    }
-
-    func click(button: RemoteMessage.MouseButton = .left) {
-        send(.click(button: button))
-    }
-
-    func doubleClick(button: RemoteMessage.MouseButton = .left) {
-        send(.doubleClick(button: button))
-    }
-
-    func scroll(dx: Double, dy: Double) {
-        send(.scroll(dx: dx, dy: dy))
-    }
-
-    func keyPress(code: UInt16, flags: UInt64 = 0) {
-        send(.key(code: code, down: true, flags: flags))
-        send(.key(code: code, down: false, flags: flags))
-    }
-
-    // MARK: - Media Controls
-
-    func playPause() {
-        send(.media(action: .playPause))
-    }
-
-    func nextTrack() {
-        send(.media(action: .nextTrack))
-    }
-
-    func previousTrack() {
-        send(.media(action: .previousTrack))
-    }
-
-    func volumeUp() {
-        send(.media(action: .volumeUp))
-    }
-
-    func volumeDown() {
-        send(.media(action: .volumeDown))
-    }
-
-    func mute() {
-        send(.media(action: .mute))
-    }
-
-    // MARK: - Brightness Controls
-
-    func brightnessUp() {
-        send(.media(action: .brightnessUp))
-    }
-
-    func brightnessDown() {
-        send(.media(action: .brightnessDown))
-    }
-
-    // MARK: - System Controls
-
-    func lockScreen() {
-        send(.system(action: .lock))
-    }
-
     @discardableResult
     func saveUnlockPairingKey(_ pairingKey: String) -> Bool {
         guard let serverId = connectedServerId else {
@@ -217,29 +147,6 @@ final class NetworkClient: ObservableObject {
         }
     }
 
-    // MARK: - App Launcher
-
-    func requestAppList() {
-        DispatchQueue.main.async {
-            self.isLoadingApps = true
-        }
-        send(.requestAppList)
-    }
-
-    func launchApp(bundleId: String) {
-        send(.launchApp(bundleId: bundleId))
-    }
-
-    // MARK: - Screen Streaming
-
-    func startScreenStream(quality: RemoteMessage.StreamQuality = .medium) {
-        send(.startScreenStream(quality: quality))
-    }
-
-    func stopScreenStream() {
-        send(.stopScreenStream)
-    }
-
     // MARK: - Receiving
 
     private func startReceiving() {
@@ -291,34 +198,15 @@ final class NetworkClient: ObservableObject {
 
     private func handleMessage(_ message: ServerMessage) {
         switch message {
-        case .connected(let width, let height, _, let unlockAvailable, let serverId):
-            screenSize = CGSize(width: width, height: height)
+        case .connected(_, _, _, let unlockAvailable, let serverId):
             connectedServerId = serverId
             isUnlockAvailable = unlockAvailable
-            print("[Client] Screen size: \(screenSize)")
 
         case .pong:
             print("[Client] Pong received")
 
         case .error(let message):
             connectionError = message
-
-        case .appList(let appList):
-            print("[Client] Processing app list with \(appList.count) apps")
-            apps = appList
-            isLoadingApps = false
-            print("[Client] App list loaded successfully")
-
-        case .screenFrame(let frame):
-            onScreenFrameReceived?(frame)
-
-        case .screenStreamStarted:
-            isScreenStreaming = true
-            print("[Client] Screen streaming started")
-
-        case .screenStreamStopped:
-            isScreenStreaming = false
-            print("[Client] Screen streaming stopped")
 
         case .unlockResult, .unlockChallenge:
             break

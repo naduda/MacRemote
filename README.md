@@ -1,22 +1,11 @@
 # MacRemote
 
-Control your Mac from your iPhone. Trackpad, keyboard, and media controls over your local network.
+Unlock your Mac from your iPhone with the Action Button and Face ID. Nothing else: no trackpad, no screen sharing.
 
 ## Features
 
-- **Trackpad**: Move cursor, tap to click, double-tap, right-click, scroll
-- **Screen Sharing**: View your Mac's screen on your iPhone with H.264 streaming (low/medium/high quality)
-- **Media Controls**: Play/pause, next/previous track, volume up/down/mute, brightness up/down
-- **Keyboard**: Native iOS keyboard input, quick shortcuts (⌘C, ⌘V, ⌘Z), arrow keys, function keys
-- **App Launcher**: Browse and launch Mac apps remotely, with favorites support
-- **System Controls**: Lock and unlock the screen remotely
 - **Protected Unlock**: The Mac password stays in the Mac Keychain; iOS requires device-owner authentication and a pairing key
-
-## Screenshots
-
-| Trackpad | Screen | Media | Keyboard | Apps | System |
-|----------|--------|-------|----------|------|--------|
-| Touch to move cursor, tap to click | View Mac screen remotely | Volume, playback, and brightness | Native keyboard + shortcuts | Launch Mac apps | Lock and unlock |
+- **Action Button / Shortcuts**: An **Unlock Mac** App Intent bound to one paired Mac
 
 ## Requirements
 
@@ -51,7 +40,7 @@ open MacRemote.xcworkspace
 1. Open the MacRemote Server menu bar window.
 2. Enter the Mac login password under **Remote Unlock** and enable it.
 3. Copy the generated pairing key.
-4. Connect from iOS, open the System tab, and save that pairing key.
+4. Connect from iOS and save that pairing key.
 5. Tap **Unlock Mac** and authenticate with Face ID, Touch ID, or the iPhone passcode.
 
 The Mac password remains in the Mac Keychain. The iOS app stores only the pairing token and sends a one-time HMAC response for each unlock request.
@@ -77,50 +66,32 @@ The Mac must be logged in with MacRemote Server running; after a FileVault-prote
 ## Architecture
 
 ```
-┌─────────────────┐         WiFi/TCP         ┌─────────────────┐
-│   iOS Client    │◄───────────────────────►│   macOS Server  │
-│                 │      JSON messages       │   (Menubar)     │
-│                 │      + H.264 stream      │                 │
-│ • Trackpad UI   │                          │ • CGEvent API   │
-│ • Screen View   │                          │ • ScreenCapture │
-│ • Media buttons │                          │ • Bonjour       │
-│ • Keyboard      │                          │ • TCP Server    │
-│ • App Launcher  │                          │ • App List      │
-│ • System Ctrl   │                          │                 │
-└─────────────────┘                          └─────────────────┘
+┌─────────────────┐       WiFi/TCP (Bonjour)       ┌─────────────────┐
+│   iOS Client    │◄─────────────────────────────►│   macOS Server  │
+│ • Pairing       │      JSON, length-prefixed     │   (Menubar)     │
+│ • Face ID       │                                │ • Challenge/HMAC│
+│ • Unlock intent │                                │ • CGEvent typing│
+└─────────────────┘                                └─────────────────┘
 ```
 
 ### Protocol
 
-Communication uses JSON messages over TCP with length-prefix framing:
+JSON messages over TCP with a 4-byte big-endian length prefix:
 
 ```swift
 // Client → Server
 enum RemoteMessage {
-    case move(dx: Double, dy: Double)
-    case click(button: MouseButton)
-    case doubleClick(button: MouseButton)
-    case scroll(dx: Double, dy: Double)
-    case key(code: UInt16, down: Bool, flags: UInt64)
-    case media(action: MediaAction)      // playPause, volumeUp, brightnessUp, etc.
-    case system(action: SystemAction)    // lock
+    case ping
     case unlock(signature: Data)         // one-time HMAC response
-    case requestAppList
-    case launchApp(bundleId: String)
-    case startScreenStream(quality: StreamQuality)
-    case stopScreenStream
 }
 
 // Server → Client
 enum ServerMessage {
-    case connected(screenWidth: Double, screenHeight: Double, serverId: String?)
+    case connected(screenWidth: Double, screenHeight: Double, unlockChallenge: Data?, unlockAvailable: Bool, serverId: String?)
     case unlockResult(success: Bool, message: String, code: UnlockResultCode?)
+    case unlockChallenge(Data)
     case pong
     case error(message: String)
-    case appList(apps: [AppInfo])
-    case screenFrame(frame: ScreenFrame)  // H.264 encoded frame
-    case screenStreamStarted
-    case screenStreamStopped
 }
 ```
 
@@ -128,33 +99,10 @@ enum ServerMessage {
 
 ```
 MacRemote/
-├── Workspace.swift              # Tuist workspace
-├── Tuist/Config.swift
-├── Shared/                      # Shared code
-│   ├── RemoteMessage.swift      # Protocol messages
-│   └── NetworkConstants.swift
-├── MacRemoteServer/             # macOS menubar app
-│   ├── Project.swift
-│   └── Sources/
-│       ├── MacRemoteServerApp.swift
-│       ├── ServerManager.swift
-│       ├── NetworkServer.swift
-│       ├── BonjourAdvertiser.swift
-│       ├── InputController.swift
-│       └── ScreenCaptureManager.swift
-└── MacRemoteClient/             # iOS app
-    ├── Project.swift
-    └── Sources/
-        ├── MacRemoteClientApp.swift
-        ├── ConnectionView.swift
-        ├── RemoteControlView.swift
-        ├── TrackpadView.swift
-        ├── ScreenView.swift
-        ├── AppsView.swift
-        ├── KeyboardView.swift
-        ├── VideoDecoder.swift
-        ├── NetworkClient.swift
-        └── BonjourBrowser.swift
+├── Shared/                      # Protocol shared by both apps
+├── MacRemoteServer/Sources/     # Menubar app: server, Bonjour, unlock verifier, keystroke injection
+├── MacRemoteClient/Sources/     # iOS app: pairing UI, unlock service, App Intent
+└── LogicTests/                  # SwiftPM harness for unlock logic
 ```
 
 ## Permissions
@@ -163,8 +111,7 @@ MacRemote/
 
 | Permission | Purpose |
 |------------|---------|
-| Accessibility | Control mouse and keyboard |
-| Screen Recording | Screen sharing feature |
+| Accessibility | Type the password on the lock screen |
 | Local Network | Bonjour discovery and TCP server |
 
 ### iOS (Client)
@@ -192,14 +139,6 @@ MacRemote/
 - Check WiFi stability
 - Ensure Mac doesn't go to sleep
 
-## Roadmap
-
-- [x] Screen sharing (view Mac desktop on iOS) - [#1](https://github.com/pedrocid/MacRemote/issues/1)
-- [x] App launcher
-- [ ] Multi-touch gestures
-- [ ] Custom shortcuts
-- [ ] Widget for iOS
-
 ## License
 
 MIT
@@ -207,7 +146,5 @@ MIT
 ## Acknowledgments
 
 Built with:
-- [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/)
-- [VideoToolbox](https://developer.apple.com/documentation/videotoolbox) (H.264 encoding/decoding)
 - [Network.framework](https://developer.apple.com/documentation/network)
 - [Bonjour](https://developer.apple.com/bonjour/)

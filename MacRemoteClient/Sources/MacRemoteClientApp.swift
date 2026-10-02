@@ -13,7 +13,7 @@ struct MacRemoteClientApp: App {
     var body: some Scene {
         WindowGroup {
             NavigationStack {
-                RemoteControlView(client: client)
+                UnlockView(client: client)
                     .navigationTitle("MacRemote")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {

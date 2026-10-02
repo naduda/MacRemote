@@ -81,14 +81,6 @@ final class NetworkServer {
         }
     }
 
-    func broadcast(_ message: ServerMessage) {
-        connections.forEach { send(message, to: $0) }
-    }
-
-    func sendToConnections(_ message: ServerMessage, matching predicate: (NWConnection) -> Bool) {
-        connections.filter(predicate).forEach { send(message, to: $0) }
-    }
-
     // MARK: - Connection Handling
 
     private func handleNewConnection(_ connection: NWConnection) {
