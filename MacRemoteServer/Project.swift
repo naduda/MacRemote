@@ -30,6 +30,7 @@ let project = Project(
                 base: [
                     "SWIFT_VERSION": "5.9",
                     "CODE_SIGN_STYLE": "Automatic",
+                    "CODE_SIGN_IDENTITY": "Apple Development",
                     "DEVELOPMENT_TEAM": "746CH7LGJ5",
                     "ENABLE_HARDENED_RUNTIME": "YES"
                 ]
