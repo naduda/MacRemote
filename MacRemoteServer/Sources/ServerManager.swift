@@ -49,6 +49,7 @@ final class ServerManager: ObservableObject {
         refreshRemoteUnlockConfiguration()
         setupServerCallbacks()
         checkPermissions()
+        start()
     }
 
     // MARK: - Remote Unlock
