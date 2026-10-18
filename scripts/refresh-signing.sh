@@ -48,6 +48,17 @@ if ! needs_refresh; then
   exit 0
 fi
 
+# Xcode reuses a cached profile until ~1h before expiry, so a refresh 36h early would reinstall the
+# same soon-to-die profile. Drop the cached MacRemote profiles to force a freshly issued one.
+for p in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"/*.mobileprovision \
+         "$HOME/Library/MobileDevice/Provisioning Profiles"/*.mobileprovision; do
+  [ -f "$p" ] || continue
+  if security cms -D -i "$p" 2>/dev/null | grep -q "com.naduda.pr.MacRemote"; then
+    log "removing cached profile $(basename "$p")"
+    rm -f "$p"
+  fi
+done
+
 cd "$ROOT" || exit 1
 [ -d MacRemote.xcworkspace ] || tuist generate --no-open || exit 1
 
@@ -62,6 +73,7 @@ if [ "$do_client" = 1 ]; then
     if xcrun devicectl device install app --device "$DEVICE" "$app"; then
       exp=$(profile_expiry_epoch "$app/embedded.mobileprovision") && echo "$exp" > "$EXPIRY_FILE"
       log "client installed; profile valid until $(date -r "${exp:-0}" '+%F %H:%M')"
+      [ $(( (${exp:-0} - $(date +%s)) / 3600 )) -ge "$THRESHOLD_HOURS" ] || { log "WARNING: profile was not renewed"; rc=1; }
     else
       log "client install FAILED (phone unlocked, on the same Wi-Fi?)"; rc=1
     fi
