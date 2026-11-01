@@ -18,6 +18,8 @@ struct MenuBarView: View {
     @ObservedObject var serverManager: ServerManager
     @State private var unlockPassword = ""
     @State private var unlockConfigurationError: String?
+    @State private var hookCommandDraft = ""
+    @State private var hookSaved = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -145,6 +147,34 @@ struct MenuBarView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                Label("On Unlock Command", systemImage: "terminal")
+                    .font(.headline)
+
+                TextField("e.g. /path/to/vpn on", text: $hookCommandDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(saveHook)
+
+                Text(serverManager.hookForeignScript
+                     ? "A hand-written on-unlock script exists; saving here replaces it."
+                     : "Runs in a login zsh after a successful unlock or password-dialog fill. Use full paths.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Save", action: saveHook)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(hookCommandDraft == serverManager.hookCommand)
+                    if hookSaved {
+                        Text("Saved").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .onAppear { hookCommandDraft = serverManager.hookCommand }
+
+            Divider()
+
             // Controls
             Button(serverManager.isRunning ? "Stop Server" : "Start Server") {
                 serverManager.toggle()
@@ -164,5 +194,10 @@ struct MenuBarView: View {
         }
         .padding()
         .frame(width: 320)
+    }
+
+    private func saveHook() {
+        hookSaved = serverManager.saveHookCommand(hookCommandDraft)
+        hookCommandDraft = serverManager.hookCommand
     }
 }

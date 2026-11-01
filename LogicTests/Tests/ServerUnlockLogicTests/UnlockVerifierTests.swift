@@ -14,6 +14,46 @@ private final class ScriptedState: SessionLockStateProviding, @unchecked Sendabl
     }
 }
 
+private final class ScriptedDetector: AuthDialogDetecting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var queue: [AuthDialogScan]
+    private var last: AuthDialogScan
+    init(_ scans: [AuthDialogScan] = [], fallback: AuthDialogScan = .windows([])) {
+        queue = scans
+        last = fallback
+    }
+    func script(_ scans: [AuthDialogScan], fallback: AuthDialogScan? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        queue = scans
+        if let fallback { last = fallback }
+    }
+    func scan() -> AuthDialogScan {
+        lock.lock(); defer { lock.unlock() }
+        if !queue.isEmpty { last = queue.removeFirst() }
+        return last
+    }
+}
+
+private final class TyperRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _result: AuthDialogTypingResult = .typed(windowID: 7)
+    private var _passwords: [String] = []
+    var result: AuthDialogTypingResult {
+        get { lock.lock(); defer { lock.unlock() }; return _result }
+        set { lock.lock(); defer { lock.unlock() }; _result = newValue }
+    }
+    var passwords: [String] { lock.lock(); defer { lock.unlock() }; return _passwords }
+    func type(_ p: String) -> AuthDialogTypingResult {
+        lock.lock(); defer { lock.unlock() }
+        _passwords.append(p)
+        return _result
+    }
+}
+
+private func dialog(_ id: UInt32) -> AuthDialogWindow {
+    AuthDialogWindow(windowID: id, ownerPID: 100, bounds: CGRect(x: 0, y: 0, width: 300, height: 200))
+}
+
 @MainActor
 private final class Fixture {
     let token = Data(repeating: 7, count: 32)
@@ -23,6 +63,14 @@ private final class Fixture {
     var typedPasswords: [String] = []
     var permitted = true
     var secretMode = 0 // 0: present, 1: nil, 2: throws
+    let detector: ScriptedDetector
+    let recorder = TyperRecorder()
+    var dialogTyperResult: AuthDialogTypingResult {
+        get { recorder.result }
+        set { recorder.result = newValue }
+    }
+    var dialogPasswords: [String] { recorder.passwords }
+    var authDialogCooldown: TimeInterval = 60
     var elapsed: TimeInterval = 0
     var challengeNumber: UInt8 = 0
     lazy var verifier = UnlockVerifier<Int>(
@@ -37,15 +85,22 @@ private final class Fixture {
             self.typedPasswords.append(password)
             return self.typerResult
         },
+        authDialog: detector,
+        submitAuthDialog: { [recorder] password in recorder.type(password) },
         randomChallenge: {
             self.challengeNumber &+= 1
             return Data(repeating: self.challengeNumber, count: 32)
         },
         sleep: { interval in self.elapsed += interval },
-        now: { Date(timeIntervalSince1970: self.elapsed) }
+        now: { Date(timeIntervalSince1970: self.elapsed) },
+        authDialogCooldown: authDialogCooldown
     )
-    init(_ states: [SessionLockState] = [.locked, .unlocked], fallback: SessionLockState = .locked) {
+    init(_ states: [SessionLockState] = [.locked, .unlocked], fallback: SessionLockState = .locked,
+         scans: [AuthDialogScan] = [], scanFallback: AuthDialogScan = .windows([]),
+         cooldown: TimeInterval = 60) {
         state = ScriptedState(states, fallback: fallback)
+        detector = ScriptedDetector(scans, fallback: scanFallback)
+        authDialogCooldown = cooldown
     }
     func signature(_ challenge: Data, token: Data? = nil) -> Data {
         UnlockWire.signature(challenge: challenge, token: token ?? self.token)
@@ -165,6 +220,8 @@ private final class Suspension {
         loadSecrets: { UnlockSecrets(token: token, password: "secret") },
         inputPermitted: { true }, lockState: state,
         typePassword: { password in await suspension.type(password) },
+        authDialog: ScriptedDetector(),
+        submitAuthDialog: { _ in .noDialog },
         randomChallenge: { number &+= 1; return Data(repeating: number, count: 32) },
         sleep: { _ in }, now: { Date() }
     )
@@ -199,4 +256,139 @@ private final class Suspension {
     #expect(removedReplay.code == .invalidSignature)
     #expect(removedReplay.nextChallenge == nil)
     #expect(!verifier.isInProgress)
+}
+
+// MARK: - Auth dialog path
+
+@MainActor
+private func attempt(_ f: Fixture, id: Int = 1) async -> UnlockResultCode {
+    let c = f.verifier.issueChallenge(for: id)
+    return await f.verifier.handleUnlock(signature: f.signature(c), from: id).code
+}
+
+private let w7 = AuthDialogScan.windows([dialog(7)])
+private let none = AuthDialogScan.windows([])
+
+@Test @MainActor func dialogClosedIsSubmitted() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scans: [w7, none, none])
+    #expect(await attempt(f) == .authDialogSubmitted)
+    #expect(f.dialogPasswords == ["secret"])
+    #expect(f.typedPasswords.isEmpty)
+}
+
+@Test @MainActor func dialogPersistsNotVerified() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.elapsed >= 6)
+    #expect(f.dialogPasswords == ["secret"])
+}
+
+@Test @MainActor func dialogGoneButLockedNotVerifiedEarly() async {
+    let f = Fixture([.unlocked, .locked], fallback: .locked, scans: [w7, none, none])
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.elapsed < 6)
+}
+
+@Test @MainActor func dialogReplacedNotVerified() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scans: [w7, .windows([dialog(9)])], scanFallback: .windows([dialog(9)]))
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.dialogPasswords == ["secret"])
+}
+
+@Test @MainActor func scansFailingDuringVerificationNotVerified() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scans: [w7], scanFallback: .failed)
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.elapsed >= 6)
+}
+
+@Test @MainActor func initialScanFailedRefused() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scans: [.failed])
+    #expect(await attempt(f) == .authDialogRefused)
+    #expect(f.dialogPasswords.isEmpty)
+    #expect(f.typedPasswords.isEmpty)
+}
+
+@Test @MainActor func typerResultMapping() async {
+    let cases: [(AuthDialogTypingResult, UnlockResultCode)] = [
+        (.noDialog, .alreadyUnlocked),
+        (.sessionNotUnlocked, .lockStateUnknown),
+        (.multipleDialogs, .authDialogRefused),
+        (.detectionFailed, .authDialogRefused),
+        (.notFocused, .authDialogRefused),
+        (.notPasswordField, .authDialogRefused),
+        (.fieldNotEmpty, .authDialogRefused),
+        (.fieldContentUnknown, .authDialogRefused),
+        (.accessibilityError(1), .authDialogRefused),
+        (.interrupted(charactersPosted: 2), .authDialogInterrupted),
+        (.postFailed, .postFailed),
+    ]
+    for (typing, expected) in cases {
+        let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+        f.dialogTyperResult = typing
+        #expect(await attempt(f) == expected)
+        #expect(f.dialogPasswords == ["secret"])
+        #expect(f.typedPasswords.isEmpty)
+    }
+}
+
+@Test @MainActor func cooldownAfterNotVerified() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.dialogPasswords.count == 1)
+    f.elapsed += 30
+    #expect(await attempt(f) == .authDialogRetryBlocked)
+    #expect(f.dialogPasswords.count == 1)
+    f.elapsed += 61
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.dialogPasswords.count == 2)
+}
+
+@Test @MainActor func nonSubmissionsDoNotStartCooldown() async {
+    for typing in [AuthDialogTypingResult.interrupted(charactersPosted: 1), .postFailed, .notFocused] {
+        let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+        f.dialogTyperResult = typing
+        _ = await attempt(f)
+        _ = await attempt(f)
+        #expect(f.dialogPasswords.count == 2)
+    }
+    let f = Fixture([.unlocked], fallback: .unlocked, scans: [.failed, w7])
+    #expect(await attempt(f) == .authDialogRefused)
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.dialogPasswords.count == 1)
+}
+
+@Test @MainActor func successClearsCooldown() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+    #expect(await attempt(f) == .notVerified)
+    f.elapsed += 61
+    f.detector.script([w7, none, none], fallback: none)
+    #expect(await attempt(f) == .authDialogSubmitted)
+    f.detector.script([], fallback: w7)
+    #expect(await attempt(f) == .notVerified)
+    #expect(f.dialogPasswords.count == 3)
+}
+
+@Test @MainActor func cooldownDoesNotAffectLockScreenPath() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+    #expect(await attempt(f) == .notVerified)
+    f.state.states = [.locked, .unlocked]
+    f.detector.script([], fallback: none)
+    #expect(await attempt(f) == .verified)
+    #expect(f.typedPasswords == ["secret"])
+    #expect(f.dialogPasswords.count == 1)
+}
+
+@Test @MainActor func lockedWithDialogUsesLockScreenPathOnly() async {
+    let f = Fixture([.locked, .unlocked], scanFallback: w7)
+    #expect(await attempt(f) == .verified)
+    #expect(f.typedPasswords == ["secret"])
+    #expect(f.dialogPasswords.isEmpty)
+}
+
+@Test @MainActor func inputNotPermittedWithDialogTypesNothing() async {
+    let f = Fixture([.unlocked], fallback: .unlocked, scanFallback: w7)
+    f.permitted = false
+    #expect(await attempt(f) == .inputNotPermitted)
+    #expect(f.typedPasswords.isEmpty)
+    #expect(f.dialogPasswords.isEmpty)
 }

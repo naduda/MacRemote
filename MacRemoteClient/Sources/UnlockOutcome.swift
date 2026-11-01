@@ -3,6 +3,7 @@ import Foundation
 enum UnlockOutcome: String, CaseIterable, Equatable, Sendable {
     case verified
     case alreadyUnlocked
+    case authDialogSubmitted
     /// The legacy server acknowledged the command without verifying the lock state.
     case sentUnverified
     case notVerified
@@ -14,6 +15,9 @@ enum UnlockOutcome: String, CaseIterable, Equatable, Sendable {
     case notConfiguredOnMac
     case inputNotPermittedOnMac
     case postFailed
+    case authDialogRefused
+    case authDialogInterrupted
+    case authDialogRetryBlocked
     case failed
     case cancelled
     case authenticationFailed
@@ -35,25 +39,30 @@ enum UnlockOutcome: String, CaseIterable, Equatable, Sendable {
         switch code {
         case .verified: return .verified
         case .alreadyUnlocked: return .alreadyUnlocked
+        case .authDialogSubmitted: return .authDialogSubmitted
         case .inProgress: return .inProgress
         case .lockStateUnknown: return .lockStateUnknown
         case .invalidSignature: return .invalidPairing
         case .notConfigured: return .notConfiguredOnMac
         case .inputNotPermitted: return .inputNotPermittedOnMac
         case .postFailed: return .postFailed
+        case .authDialogRefused: return .authDialogRefused
+        case .authDialogInterrupted: return .authDialogInterrupted
+        case .authDialogRetryBlocked: return .authDialogRetryBlocked
         case .notVerified: return .notVerified
         case .unrecognized: return .failed
         }
     }
 
     var isSuccess: Bool {
-        self == .verified || self == .alreadyUnlocked
+        self == .verified || self == .alreadyUnlocked || self == .authDialogSubmitted
     }
 
     var localizationKey: String {
         switch self {
         case .verified: return "unlock_outcome_verified"
         case .alreadyUnlocked: return "unlock_outcome_already_unlocked"
+        case .authDialogSubmitted: return "unlock_outcome_auth_dialog_submitted"
         case .sentUnverified: return "unlock_outcome_sent_unverified"
         case .notVerified: return "unlock_outcome_not_verified"
         case .resultUnknown: return "unlock_outcome_result_unknown"
@@ -63,6 +72,9 @@ enum UnlockOutcome: String, CaseIterable, Equatable, Sendable {
         case .notConfiguredOnMac: return "unlock_outcome_not_configured_on_mac"
         case .inputNotPermittedOnMac: return "unlock_outcome_input_not_permitted_on_mac"
         case .postFailed: return "unlock_outcome_post_failed"
+        case .authDialogRefused: return "unlock_outcome_auth_dialog_refused"
+        case .authDialogInterrupted: return "unlock_outcome_auth_dialog_interrupted"
+        case .authDialogRetryBlocked: return "unlock_outcome_auth_dialog_retry_blocked"
         case .failed: return "unlock_outcome_failed"
         case .cancelled: return "unlock_outcome_cancelled"
         case .authenticationFailed: return "unlock_outcome_authentication_failed"

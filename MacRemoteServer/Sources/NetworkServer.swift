@@ -1,8 +1,9 @@
 import Foundation
 import Network
 
-/// TCP Server that listens for connections and handles remote control messages
-final class NetworkServer {
+/// TCP Server that listens for connections and handles remote control messages.
+/// `@unchecked Sendable`: `connections` is only read or written on `queue`; callbacks are set before `start`.
+final class NetworkServer: @unchecked Sendable {
 
     private var listener: NWListener?
     private var connections: [NWConnection] = []
@@ -64,20 +65,39 @@ final class NetworkServer {
         isRunning = false
     }
 
-    func send(_ message: ServerMessage, to connection: NWConnection) {
-        guard connections.contains(where: { $0 === connection }) else { return }
+    enum SendOutcome: Sendable {
+        case sent
+        case failed(String)
+        case notConnected
+    }
+
+    /// Sends `message` to `connection`. If provided, `completion` runs exactly once, on the server queue.
+    func send(_ message: ServerMessage, to connection: NWConnection, completion: (@Sendable (SendOutcome) -> Void)? = nil) {
+        let data: Data
         do {
-            let data = try MessageFrame.encode(message)
+            data = try MessageFrame.encode(message)
+        } catch {
+            print("[Server] Encode error: \(error)")
+            let description = "\(error)"
+            queue.async { completion?(.failed(description)) }
+            return
+        }
+        queue.async { [self] in
+            guard connections.contains(where: { $0 === connection }) else {
+                print("[Server] Send skipped: connection no longer registered")
+                completion?(.notConnected)
+                return
+            }
             print("[Server] Sending \(data.count) bytes")
             connection.send(content: data, completion: .contentProcessed { error in
                 if let error = error {
                     print("[Server] Send error: \(error)")
+                    completion?(.failed("\(error)"))
                 } else {
                     print("[Server] Send completed successfully")
+                    completion?(.sent)
                 }
             })
-        } catch {
-            print("[Server] Encode error: \(error)")
         }
     }
 
@@ -93,7 +113,7 @@ final class NetworkServer {
             switch state {
             case .ready:
                 print("[Server] Client connected: \(connection.endpoint)")
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     self?.onClientConnected?(connection)
                 }
                 self?.receiveMessage(from: connection)
@@ -179,7 +199,10 @@ final class NetworkServer {
         }
     }
 
+    /// Must be called from outside `queue` (the main thread); it synchronizes on `queue`.
     var connectedClientsCount: Int {
-        connections.filter { $0.state == .ready }.count
+        queue.sync {
+            connections.filter { $0.state == .ready }.count
+        }
     }
 }

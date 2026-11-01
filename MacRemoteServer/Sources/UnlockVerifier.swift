@@ -16,32 +16,90 @@ final class UnlockVerifier<ConnectionID: Hashable & Sendable> {
     private let inputPermitted: () -> Bool
     private let lockState: SessionLockStateProviding
     private let typePassword: (String) async -> UnlockTypingResult
+    private let authDialog: AuthDialogDetecting
+    private let submitAuthDialog: @Sendable (String) async -> AuthDialogTypingResult
     private let randomChallenge: () -> Data
     private let sleep: (TimeInterval) async -> Void
     private let now: () -> Date
     private let verifyDeadline: TimeInterval
     private let pollInterval: TimeInterval
+    private let authDialogCooldown: TimeInterval
+    private var authDialogBlockedUntil: Date?
 
     init(
         loadSecrets: @escaping () throws -> UnlockSecrets?,
         inputPermitted: @escaping () -> Bool,
         lockState: SessionLockStateProviding,
         typePassword: @escaping (String) async -> UnlockTypingResult,
+        authDialog: AuthDialogDetecting,
+        submitAuthDialog: @escaping @Sendable (String) async -> AuthDialogTypingResult,
         randomChallenge: @escaping () -> Data,
         sleep: @escaping (TimeInterval) async -> Void,
         now: @escaping () -> Date,
         verifyDeadline: TimeInterval = UnlockWire.verifyDeadline,
-        pollInterval: TimeInterval = UnlockWire.verifyPollInterval
+        pollInterval: TimeInterval = UnlockWire.verifyPollInterval,
+        authDialogCooldown: TimeInterval = 60
     ) {
         self.loadSecrets = loadSecrets
         self.inputPermitted = inputPermitted
         self.lockState = lockState
         self.typePassword = typePassword
+        self.authDialog = authDialog
+        self.submitAuthDialog = submitAuthDialog
         self.randomChallenge = randomChallenge
         self.sleep = sleep
         self.now = now
         self.verifyDeadline = verifyDeadline
         self.pollInterval = pollInterval
+        self.authDialogCooldown = authDialogCooldown
+    }
+
+    /// Returns the first non-nil value produced by `step` before `verifyDeadline`, or nil.
+    private func poll<T>(_ step: () -> T?) async -> T? {
+        let deadline = now().addingTimeInterval(verifyDeadline)
+        while true {
+            if let value = step() { return value }
+            if now() >= deadline { return nil }
+            await sleep(pollInterval)
+        }
+    }
+
+    /// The cooldown applies only after Return was posted, to avoid account lockout
+    /// from repeated wrong-password submissions. Refusals, interruptions and post
+    /// failures submitted nothing and never start it.
+    private func handleAuthDialog(password: String) async -> UnlockResultCode {
+        switch authDialog.scan() {
+        case .failed:
+            print("[Server] Window scan failed; cannot tell whether an auth dialog is open")
+            return .authDialogRefused
+        case .windows(let w) where w.isEmpty:
+            return .alreadyUnlocked
+        case .windows:
+            break
+        }
+        if let until = authDialogBlockedUntil, until > now() { return .authDialogRetryBlocked }
+
+        switch await submitAuthDialog(password) {
+        case .noDialog: return .alreadyUnlocked
+        case .sessionNotUnlocked: return .lockStateUnknown
+        case .multipleDialogs, .detectionFailed, .notFocused, .notPasswordField,
+             .fieldNotEmpty, .fieldContentUnknown, .accessibilityError:
+            return .authDialogRefused
+        case .interrupted: return .authDialogInterrupted
+        case .postFailed: return .postFailed
+        case .typed(let id):
+            var tracker = AuthDialogCloseTracker(target: id)
+            let status = await poll { () -> AuthDialogCloseTracker.Status? in
+                let s = tracker.observe(lockState: lockState.currentState(), scan: authDialog.scan())
+                return s == .pending ? nil : s
+            }
+            if status == .closed {
+                authDialogBlockedUntil = nil
+                return .authDialogSubmitted
+            }
+            authDialogBlockedUntil = now().addingTimeInterval(authDialogCooldown)
+            return .notVerified
+        }
     }
 
     func issueChallenge(for id: ConnectionID) -> Data {
@@ -68,7 +126,7 @@ final class UnlockVerifier<ConnectionID: Hashable & Sendable> {
                 if signature.constantTimeEquals(expected) {
                     if inputPermitted() {
                         switch lockState.currentState() {
-                        case .unlocked: code = .alreadyUnlocked
+                        case .unlocked: code = await handleAuthDialog(password: secrets.password)
                         case .unknown: code = .lockStateUnknown
                         case .locked:
                             switch await typePassword(secrets.password) {
@@ -76,18 +134,8 @@ final class UnlockVerifier<ConnectionID: Hashable & Sendable> {
                             case .skippedLockStateUnknown: code = .lockStateUnknown
                             case .postFailed: code = .postFailed
                             case .typed:
-                                let deadline = now().addingTimeInterval(verifyDeadline)
-                                while true {
-                                    if lockState.currentState() == .unlocked {
-                                        code = .verified
-                                        break
-                                    }
-                                    if now() >= deadline {
-                                        code = .notVerified
-                                        break
-                                    }
-                                    await sleep(pollInterval)
-                                }
+                                let unlocked: Bool? = await poll { lockState.currentState() == .unlocked ? true : nil }
+                                code = unlocked == true ? .verified : .notVerified
                             }
                         }
                     } else {

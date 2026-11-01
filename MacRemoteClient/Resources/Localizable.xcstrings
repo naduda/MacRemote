@@ -214,6 +214,70 @@
         }
       }
     },
+    "unlock_outcome_auth_dialog_interrupted" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Typing into the Mac authentication dialog stopped because focus changed. The dialog was not submitted."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se detuvo la escritura en el diálogo de autenticación del Mac porque cambió el foco. El diálogo no se envió."
+          }
+        }
+      }
+    },
+    "unlock_outcome_auth_dialog_refused" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Mac authentication dialog's password field is not focused or not empty. Nothing was typed."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El campo de contraseña del diálogo de autenticación del Mac no tiene el foco o no está vacío. No se ha escrito nada."
+          }
+        }
+      }
+    },
+    "unlock_outcome_auth_dialog_retry_blocked" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The last attempt in the Mac authentication dialog failed. Try again in a minute or enter the password on the Mac."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El último intento en el diálogo de autenticación del Mac ha fallado. Inténtalo de nuevo en un minuto o introduce la contraseña en el Mac."
+          }
+        }
+      }
+    },
+    "unlock_outcome_auth_dialog_submitted" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Password entered into the Mac authentication dialog."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se ha introducido la contraseña en el diálogo de autenticación del Mac."
+          }
+        }
+      }
+    },
     "unlock_outcome_authentication_failed" : {
       "localizations" : {
         "en" : {

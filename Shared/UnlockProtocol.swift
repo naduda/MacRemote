@@ -3,7 +3,9 @@ import CryptoKit
 
 enum UnlockResultCode: String, Codable, Sendable {
     case verified, alreadyUnlocked, inProgress, lockStateUnknown, invalidSignature
-    case notConfigured, inputNotPermitted, postFailed, notVerified, unrecognized
+    case notConfigured, inputNotPermitted, postFailed, notVerified
+    case authDialogSubmitted, authDialogRefused, authDialogInterrupted, authDialogRetryBlocked
+    case unrecognized
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -11,7 +13,7 @@ enum UnlockResultCode: String, Codable, Sendable {
         self = value.flatMap(Self.init(rawValue:)) ?? .unrecognized
     }
 
-    var isSuccess: Bool { self == .verified || self == .alreadyUnlocked }
+    var isSuccess: Bool { self == .verified || self == .alreadyUnlocked || self == .authDialogSubmitted }
 }
 
 enum UnlockWire {

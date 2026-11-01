@@ -13,6 +13,10 @@ import Testing
         (.inputNotPermitted, .inputNotPermittedOnMac),
         (.postFailed, .postFailed),
         (.notVerified, .notVerified),
+        (.authDialogSubmitted, .authDialogSubmitted),
+        (.authDialogRefused, .authDialogRefused),
+        (.authDialogInterrupted, .authDialogInterrupted),
+        (.authDialogRetryBlocked, .authDialogRetryBlocked),
         (.unrecognized, .failed),
     ]
 
@@ -43,7 +47,7 @@ import Testing
 }
 
 @Test func everyOutcomeHasAUniqueSnakeCaseLocalizationKey() {
-    #expect(UnlockOutcome.allCases.count == 23)
+    #expect(UnlockOutcome.allCases.count == 27)
     let keys = UnlockOutcome.allCases.map(\.localizationKey)
     #expect(Set(keys).count == keys.count)
     for outcome in UnlockOutcome.allCases {

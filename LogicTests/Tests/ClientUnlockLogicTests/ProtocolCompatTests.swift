@@ -51,6 +51,36 @@ private func decode(_ json: String) throws -> ServerMessage {
     #expect(UnlockResultCode.alreadyUnlocked.isSuccess)
 }
 
+@Test func authDialogCodesDecodeAndOnlySubmittedIsSuccess() throws {
+    let expected: [(String, UnlockResultCode, Bool)] = [
+        ("authDialogSubmitted", .authDialogSubmitted, true),
+        ("authDialogRefused", .authDialogRefused, false),
+        ("authDialogInterrupted", .authDialogInterrupted, false),
+        ("authDialogRetryBlocked", .authDialogRetryBlocked, false),
+    ]
+    for (raw, expectedCode, serverSuccess) in expected {
+        let json = #"{"unlockResult":{"success":\#(serverSuccess),"message":"x","code":"\#(raw)"}}"#
+        guard case let .unlockResult(_, _, decodedCode) = try decode(json) else {
+            Issue.record("Auth dialog code \(raw) did not decode")
+            return
+        }
+        #expect(decodedCode == expectedCode)
+        #expect(expectedCode.isSuccess == (expectedCode == .authDialogSubmitted))
+        #expect(UnlockOutcome.fromServer(success: serverSuccess, code: decodedCode).isSuccess == (expectedCode == .authDialogSubmitted))
+    }
+}
+
+@Test func unknownCodeFromNewServerFailsForOldClient() throws {
+    let json = #"{"unlockResult":{"success":true,"message":"x","code":"authDialogFromFuture"}}"#
+    guard case let .unlockResult(success, _, code) = try decode(json) else {
+        Issue.record("Expected unlockResult")
+        return
+    }
+    #expect(code == .unrecognized)
+    #expect(UnlockOutcome.fromServer(success: success, code: code) == .failed)
+    #expect(!UnlockOutcome.fromServer(success: success, code: code).isSuccess)
+}
+
 @Test func newCasesDecodeWithOldSchemaAndRoundTrip() throws {
     let messages: [ServerMessage] = [
         .connected(screenWidth: 1, screenHeight: 2, unlockChallenge: Data([1, 2]), unlockAvailable: true, serverId: "test-mac"),

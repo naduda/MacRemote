@@ -1,0 +1,1 @@
+../../../MacRemoteServer/Sources/AuthDialog.swift

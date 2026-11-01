@@ -37,9 +37,9 @@ struct UnlockMacIntent: AppIntent {
             }
         }
 
-        // Success is silent (no result dialog with a Done button); everything else is surfaced as an error.
+        // Opaque some IntentResult cannot mix .result() and .result(dialog:), so success stays silent per design-decisions.md.
         switch outcome {
-        case .verified, .alreadyUnlocked:
+        case .verified, .alreadyUnlocked, .authDialogSubmitted:
             return .result()
         default:
             throw UnlockIntentError(message: LocalizedStringResource(String.LocalizationValue(outcome.localizationKey)))
