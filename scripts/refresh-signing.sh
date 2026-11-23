@@ -29,6 +29,13 @@ done
 
 mkdir -p "$STATE_DIR"
 log() { echo "[refresh $(date '+%F %T')] $*"; }
+notify() { osascript -e "display notification \"$1\" with title \"MacRemote refresh\" sound name \"Basso\"" >/dev/null 2>&1; }
+
+# keep the launchd log from growing forever
+LAUNCHD_LOG="$STATE_DIR/launchd.log"
+if [ -f "$LAUNCHD_LOG" ] && [ "$(wc -l < "$LAUNCHD_LOG")" -gt 3000 ]; then
+  tail -n 1000 "$LAUNCHD_LOG" > "$LAUNCHD_LOG.tmp" && cat "$LAUNCHD_LOG.tmp" > "$LAUNCHD_LOG"; rm -f "$LAUNCHD_LOG.tmp"
+fi
 
 profile_expiry_epoch() {
   security cms -D -i "$1" 2>/dev/null > "$STATE_DIR/profile.plist" || return 1
@@ -73,12 +80,13 @@ if [ "$do_client" = 1 ]; then
     if xcrun devicectl device install app --device "$DEVICE" "$app"; then
       exp=$(profile_expiry_epoch "$app/embedded.mobileprovision") && echo "$exp" > "$EXPIRY_FILE"
       log "client installed; profile valid until $(date -r "${exp:-0}" '+%F %H:%M')"
-      [ $(( (${exp:-0} - $(date +%s)) / 3600 )) -ge "$THRESHOLD_HOURS" ] || { log "WARNING: profile was not renewed"; rc=1; }
+      [ $(( (${exp:-0} - $(date +%s)) / 3600 )) -ge "$THRESHOLD_HOURS" ] || { log "WARNING: profile was not renewed"; rc=1; notify "Profile was not renewed"; }
     else
       log "client install FAILED (phone unlocked, on the same Wi-Fi?)"; rc=1
+      notify "Client install failed - unlock the iPhone (same Wi-Fi). Retrying hourly."
     fi
   else
-    log "client build FAILED"; rc=1
+    log "client build FAILED"; rc=1; notify "Client build failed - see ~/.macremote-refresh/launchd.log"
   fi
 fi
 
@@ -91,7 +99,7 @@ if [ "$do_server" = 1 ]; then
     cp -R "$DERIVED/Build/Products/Debug/MacRemoteServer.app" /Applications/ && open /Applications/MacRemoteServer.app
     log "server reinstalled and launched"
   else
-    log "server build FAILED"; rc=1
+    log "server build FAILED"; rc=1; notify "Server build failed - see ~/.macremote-refresh/launchd.log"
   fi
 fi
 
